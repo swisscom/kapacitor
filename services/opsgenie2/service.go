@@ -107,12 +107,13 @@ func (s *Service) Test(options interface{}) error {
 		o.Message,
 		o.EntityID,
 		time.Now(),
+		"",
 		models.Result{},
 	)
 }
 
-func (s *Service) Alert(teams []string, recipients []string, level alert.Level, message, entityID string, t time.Time, details models.Result) error {
-	req, err := s.preparePost(teams, recipients, level, message, entityID, t, details)
+func (s *Service) Alert(teams []string, recipients []string, level alert.Level, message, entityID string, t time.Time, description string, details models.Result) error {
+	req, err := s.preparePost(teams, recipients, level, message, entityID, t, description, details)
 	if err != nil {
 		return errors.Wrap(err, "failed to prepare API request")
 	}
@@ -139,7 +140,7 @@ func (s *Service) Alert(teams []string, recipients []string, level alert.Level, 
 	return nil
 }
 
-func (s *Service) preparePost(teams []string, recipients []string, level alert.Level, message, entityID string, t time.Time, details models.Result) (*http.Request, error) {
+func (s *Service) preparePost(teams []string, recipients []string, level alert.Level, message, entityID string, t time.Time, description string, details models.Result) (*http.Request, error) {
 	c := s.config()
 	if !c.Enabled {
 		return nil, errors.New("service is not enabled")
@@ -175,13 +176,9 @@ func (s *Service) preparePost(teams []string, recipients []string, level alert.L
 		ogData["message"] = message
 		ogData["note"] = ""
 		ogData["priority"] = priority
-
-		// Encode details as description
-		b, err := json.Marshal(details)
-		if err != nil {
-			return nil, err
+		if len(description) > 0 {
+			ogData["description"] = description
 		}
-		ogData["description"] = string(b)
 
 		//Extra Fields (can be used for filtering)
 		ogDetails := make(map[string]string)
@@ -275,6 +272,7 @@ func (h *handler) Handle(event alert.Event) {
 		event.State.Message,
 		event.State.ID,
 		event.State.Time,
+		event.State.Details,
 		event.Data.Result,
 	); err != nil {
 		h.diag.Error("failed to send event to OpsGenie", err)
