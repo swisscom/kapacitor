@@ -2,6 +2,37 @@
 
 ## unreleased
 
+### Features
+
+### Bugfixes
+
+## v1.5.4 [2020-01-16]
+
+### Features
+
+- [#2202](https://github.com/influxdata/kapacitor/pull/2202): Add templating for MQTT topics.
+- [#2276](https://github.com/influxdata/kapacitor/pull/2276): Upgrade to support python 3 for UDFs, Thanks @N-Coder !
+
+### Bugfixes
+
+- [#2253](https://github.com/influxdata/kapacitor/pull/2253): Upgrade the kafka library to set the timestamp correctly.
+- [#2274](https://github.com/influxdata/kapacitor/pull/2274): Upgrade to Go 1.13, fixes various go vet issues.
+
+## v1.5.3 [2019-06-18]
+
+### Features
+
+- [#2154](https://github.com/influxdata/kapacitor/pull/2154): Add ability to skip ssl verification with an alert post node. Thanks @itsHabib!
+- [#2193](https://github.com/influxdata/kapacitor/issues/2193): Add TLS configuration options.
+
+### Bugfixes
+
+- [#2167](https://github.com/influxdata/kapacitor/pull/2167): Use default transport consistently.
+- [#2144](https://github.com/influxdata/kapacitor/issues/2144): Fix deadlock in barrier node when delete is used.
+- [#2186](https://github.com/influxdata/kapacitor/pull/2186): Make RPM create files with correct ownership on install.
+- [#2189](https://github.com/influxdata/kapacitor/pull/2189): Delete group stats when a group is deleted
+- [#2207](https://github.com/influxdata/kapacitor/pull/2207): Avoid extra allocation when building GroupID
+
 ## v1.5.2 [2018-12-12]
 
 ### Features

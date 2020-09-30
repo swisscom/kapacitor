@@ -5320,6 +5320,21 @@ func TestServer_UDFStreamAgents(t *testing.T) {
 				},
 			},
 		},
+		// Python 2
+		{
+			buildFunc: func() error { return nil },
+			config: udf.FunctionConfig{
+				Prog:    Python2Executable,
+				Args:    []string{"-u", filepath.Join(udfDir, "agent/examples/moving_avg/moving_avg.py")},
+				Timeout: toml.Duration(time.Minute),
+				Env: map[string]string{
+					"PYTHONPATH": strings.Join(
+						[]string{filepath.Join(udfDir, "agent/py"), os.Getenv("PYTHONPATH")},
+						string(filepath.ListSeparator),
+					),
+				},
+			},
+		},
 	}
 	for _, agent := range agents {
 		err := agent.buildFunc()
@@ -5497,6 +5512,33 @@ func TestServer_UDFStreamAgentsSocket(t *testing.T) {
 				Timeout: toml.Duration(time.Minute),
 			},
 		},
+		// Python 2
+		{
+			startFunc: func() *exec.Cmd {
+				cmd := exec.Command(
+					Python2Executable,
+					"-u",
+					filepath.Join(udfDir, "agent/examples/mirror/mirror.py"),
+					filepath.Join(tdir, "mirror.py.sock"),
+				)
+				cmd.Stderr = os.Stderr
+				env := os.Environ()
+				env = append(env, fmt.Sprintf(
+					"%s=%s",
+					"PYTHONPATH",
+					strings.Join(
+						[]string{filepath.Join(udfDir, "agent/py"), os.Getenv("PYTHONPATH")},
+						string(filepath.ListSeparator),
+					),
+				))
+				cmd.Env = env
+				return cmd
+			},
+			config: udf.FunctionConfig{
+				Socket:  filepath.Join(tdir, "mirror.py.sock"),
+				Timeout: toml.Duration(time.Minute),
+			},
+		},
 	}
 	for _, agent := range agents {
 		cmd := agent.startFunc()
@@ -5635,6 +5677,21 @@ func TestServer_UDFBatchAgents(t *testing.T) {
 			buildFunc: func() error { return nil },
 			config: udf.FunctionConfig{
 				Prog:    PythonExecutable,
+				Args:    []string{"-u", filepath.Join(udfDir, "agent/examples/outliers/outliers.py")},
+				Timeout: toml.Duration(time.Minute),
+				Env: map[string]string{
+					"PYTHONPATH": strings.Join(
+						[]string{filepath.Join(udfDir, "agent/py"), os.Getenv("PYTHONPATH")},
+						string(filepath.ListSeparator),
+					),
+				},
+			},
+		},
+		// Python 2
+		{
+			buildFunc: func() error { return nil },
+			config: udf.FunctionConfig{
+				Prog:    Python2Executable,
 				Args:    []string{"-u", filepath.Join(udfDir, "agent/examples/outliers/outliers.py")},
 				Timeout: toml.Duration(time.Minute),
 				Env: map[string]string{
@@ -9634,8 +9691,22 @@ func TestServer_AlertHandlers(t *testing.T) {
 					Offset:    0,
 					Key:       "id",
 					Message:   string(adJSON) + "\n",
+					Time:      time.Now().UTC(),
 				}}
-				if !cmp.Equal(exp, got) {
+				cmpopts := []cmp.Option{
+					cmp.Comparer(func(a, b time.Time) bool {
+						diff := a.Sub(b)
+						if diff < 0 {
+							diff = -diff
+						}
+						// It is ok as long as the timestamp is within
+						// 5 seconds of the current time. If we are that close,
+						// then it likely means the timestamp was correctly
+						// written.
+						return diff < 5*time.Second
+					}),
+				}
+				if !cmp.Equal(exp, got, cmpopts...) {
 					return fmt.Errorf("unexpected kafka messages -exp/+got:\n%s", cmp.Diff(exp, got))
 				}
 				return nil
@@ -9721,6 +9792,53 @@ func TestServer_AlertHandlers(t *testing.T) {
 				got := s.Clients[0].PublishData
 				exp := []mqtttest.PublishData{{
 					Topic:    "test",
+					QoS:      mqtt.AtLeastOnce,
+					Retained: true,
+					Message:  []byte("message"),
+				}}
+				if !reflect.DeepEqual(exp, got) {
+					return fmt.Errorf("unexpected mqtt publish data:\nexp\n%+v\ngot\n%+v\n", exp, got)
+				}
+				return nil
+			},
+		},
+		{
+			handler: client.TopicHandler{
+				Kind: "mqtt",
+				Options: map[string]interface{}{
+					"topic":    "test/{{.TaskName}}",
+					"qos":      "at-least-once",
+					"retained": true,
+				},
+			},
+			setup: func(c *server.Config, ha *client.TopicHandler) (context.Context, error) {
+				cc := new(mqtttest.ClientCreator)
+				ctxt := context.WithValue(nil, "clientCreator", cc)
+				cfg := &mqtt.Config{
+					Enabled: true,
+					Name:    "test",
+					URL:     "tcp://mqtt.example.com:1883",
+				}
+
+				cfg.SetNewClientF(cc.NewClient)
+
+				c.MQTT = mqtt.Configs{*cfg}
+				return ctxt, nil
+			},
+			result: func(ctxt context.Context) error {
+				s := ctxt.Value("clientCreator").(*mqtttest.ClientCreator)
+				if got, exp := len(s.Clients), 1; got != exp {
+					return fmt.Errorf("unexpected number of clients created : exp %d got: %d", exp, got)
+				}
+				if got, exp := len(s.Configs), 1; got != exp {
+					return fmt.Errorf("unexpected number of configs received: exp %d got: %d", exp, got)
+				}
+				if got, exp := s.Configs[0].URL, "tcp://mqtt.example.com:1883"; exp != got {
+					return fmt.Errorf("unexpected config URL: exp %q got %q", exp, got)
+				}
+				got := s.Clients[0].PublishData
+				exp := []mqtttest.PublishData{{
+					Topic:    "test/testAlertHandlers",
 					QoS:      mqtt.AtLeastOnce,
 					Retained: true,
 					Message:  []byte("message"),

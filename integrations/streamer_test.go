@@ -76,7 +76,7 @@ import (
 	"github.com/influxdata/kapacitor/services/victorops/victoropstest"
 	"github.com/influxdata/kapacitor/udf"
 	"github.com/influxdata/kapacitor/udf/agent"
-	"github.com/influxdata/kapacitor/udf/test"
+	udf_test "github.com/influxdata/kapacitor/udf/test"
 	"github.com/influxdata/wlog"
 	"github.com/k-sone/snmpgo"
 )
@@ -84,6 +84,7 @@ import (
 var diagService *diagnostic.Service
 
 func init() {
+	testing.Init()
 	flag.Parse()
 	out := ioutil.Discard
 	if testing.Verbose() {
@@ -7091,7 +7092,7 @@ stream
 				exp.Values = []*agent.OptionValue{
 					{
 						Type:  agent.ValueType_STRING,
-						Value: &agent.OptionValue_StringValue{"count"},
+						Value: &agent.OptionValue_StringValue{StringValue: "count"},
 					},
 				}
 			case 1:
@@ -7099,23 +7100,23 @@ stream
 				exp.Values = []*agent.OptionValue{
 					{
 						Type:  agent.ValueType_BOOL,
-						Value: &agent.OptionValue_BoolValue{false},
+						Value: &agent.OptionValue_BoolValue{BoolValue: false},
 					},
 					{
 						Type:  agent.ValueType_INT,
-						Value: &agent.OptionValue_IntValue{1},
+						Value: &agent.OptionValue_IntValue{IntValue: 1},
 					},
 					{
 						Type:  agent.ValueType_DOUBLE,
-						Value: &agent.OptionValue_DoubleValue{1.0},
+						Value: &agent.OptionValue_DoubleValue{DoubleValue: 1.0},
 					},
 					{
 						Type:  agent.ValueType_STRING,
-						Value: &agent.OptionValue_StringValue{"1.0"},
+						Value: &agent.OptionValue_StringValue{StringValue: "1.0"},
 					},
 					{
 						Type:  agent.ValueType_DURATION,
-						Value: &agent.OptionValue_DurationValue{int64(time.Second)},
+						Value: &agent.OptionValue_DurationValue{DurationValue: int64(time.Second)},
 					},
 				}
 			}
@@ -8642,6 +8643,7 @@ stream
 			Offset:    0,
 			Key:       "kapacitor/cpu/serverA",
 			Message:   "kapacitor/cpu/serverA is CRITICAL",
+			Time:      time.Now().UTC(),
 		},
 	}
 
@@ -8658,7 +8660,23 @@ stream
 		got[i] = m
 	}
 
-	if err := compareListIgnoreOrder(got, exp, nil); err != nil {
+	cmpopts := []cmp.Option{
+		cmp.Comparer(func(a, b time.Time) bool {
+			diff := a.Sub(b)
+			if diff < 0 {
+				diff = -diff
+			}
+			// It is ok as long as the timestamp is within
+			// 5 seconds of the current time. If we are that close,
+			// then it likely means the timestamp was correctly
+			// written.
+			return diff < 5*time.Second
+		}),
+	}
+	cmpF := func(got, exp interface{}) bool {
+		return cmp.Equal(exp, got, cmpopts...)
+	}
+	if err := compareListIgnoreOrder(got, exp, cmpF); err != nil {
 		t.Error(err)
 	}
 }
