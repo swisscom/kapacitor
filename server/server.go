@@ -2,6 +2,7 @@
 package server
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -28,6 +29,7 @@ import (
 	"github.com/influxdata/kapacitor/services/consul"
 	"github.com/influxdata/kapacitor/services/deadman"
 	"github.com/influxdata/kapacitor/services/diagnostic"
+	"github.com/influxdata/kapacitor/services/discord"
 	"github.com/influxdata/kapacitor/services/dns"
 	"github.com/influxdata/kapacitor/services/ec2"
 	"github.com/influxdata/kapacitor/services/file_discovery"
@@ -64,6 +66,7 @@ import (
 	"github.com/influxdata/kapacitor/services/swarm"
 	"github.com/influxdata/kapacitor/services/talk"
 	"github.com/influxdata/kapacitor/services/task_store"
+	"github.com/influxdata/kapacitor/services/teams"
 	"github.com/influxdata/kapacitor/services/telegram"
 	"github.com/influxdata/kapacitor/services/triton"
 	"github.com/influxdata/kapacitor/services/udf"
@@ -98,7 +101,8 @@ type Server struct {
 	dataDir  string
 	hostname string
 
-	config *Config
+	config    *Config
+	tlsConfig *tls.Config
 
 	err chan error
 
@@ -158,9 +162,18 @@ func New(c *Config, buildInfo BuildInfo, diagService *diagnostic.Service) (*Serv
 	if err != nil {
 		return nil, fmt.Errorf("invalid configuration: %s. To generate a valid configuration file run `kapacitord config > kapacitor.generated.conf`.", err)
 	}
+	// Setup base TLS config used for the Kapacitor API
+	tlsConfig, err := c.TLS.Parse()
+	if err != nil {
+		return nil, errors.Wrap(err, "tls configuration")
+	}
+	if tlsConfig == nil {
+		tlsConfig = new(tls.Config)
+	}
 	d := diagService.NewServerHandler()
 	s := &Server{
 		config:           c,
+		tlsConfig:        tlsConfig,
 		BuildInfo:        buildInfo,
 		dataDir:          c.DataDir,
 		hostname:         c.Hostname,
@@ -229,6 +242,9 @@ func New(c *Config, buildInfo BuildInfo, diagService *diagnostic.Service) (*Serv
 
 	// Append Alert integration services
 	s.appendAlertaService()
+	if err := s.appendDiscordService(); err != nil {
+		return nil, errors.Wrap(err, "discord service")
+	}
 	s.appendHipChatService()
 	s.appendKafkaService()
 	if err := s.appendMQTTService(); err != nil {
@@ -243,6 +259,7 @@ func New(c *Config, buildInfo BuildInfo, diagService *diagnostic.Service) (*Serv
 		return nil, errors.Wrap(err, "httppost service")
 	}
 	s.appendSMTPService()
+	s.appendTeamsService()
 	s.appendTelegramService()
 	if err := s.appendSlackService(); err != nil {
 		return nil, errors.Wrap(err, "slack service")
@@ -448,7 +465,7 @@ func (s *Server) appendInfluxDBService() error {
 
 func (s *Server) initHTTPDService() {
 	d := s.DiagService.NewHTTPDHandler()
-	srv := httpd.NewService(s.config.HTTP, s.hostname, d)
+	srv := httpd.NewService(s.config.HTTP, s.hostname, s.tlsConfig, d)
 
 	srv.LocalHandler.PointsWriter = s.TaskMaster
 	srv.Handler.PointsWriter = s.TaskMaster
@@ -757,6 +774,22 @@ func (s *Server) appendAlertaService() {
 	s.AppendService("alerta", srv)
 }
 
+func (s *Server) appendDiscordService() error {
+	c := s.config.Discord
+	d := s.DiagService.NewDiscordHandler()
+	srv, err := discord.NewService(c, d)
+	if err != nil {
+		return err
+	}
+
+	s.TaskMaster.DiscordService = srv
+	s.AlertService.DiscordService = srv
+
+	s.SetDynamicService("discord", srv)
+	s.AppendService("discord", srv)
+	return nil
+}
+
 func (s *Server) appendTalkService() {
 	c := s.config.Talk
 	d := s.DiagService.NewTalkHandler()
@@ -954,6 +987,18 @@ func (s *Server) appendTritonService() {
 	srv := triton.NewService(c, s.ScraperService, d)
 	s.SetDynamicService("triton", srv)
 	s.AppendService("triton", srv)
+}
+
+func (s *Server) appendTeamsService() {
+	c := s.config.Teams
+	d := s.DiagService.NewTeamsHandler()
+	srv := teams.NewService(c, d)
+
+	s.TaskMaster.TeamsService = srv
+	s.AlertService.TeamsService = srv
+
+	s.SetDynamicService("teams", srv)
+	s.AppendService("teams", srv)
 }
 
 // Err returns an error channel that multiplexes all out of band errors received from all services.
